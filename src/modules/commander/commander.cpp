@@ -1129,6 +1129,7 @@ int commander_thread_main(int argc, char *argv[])
 			}
 		}
 
+		//  TODO why does the commander care about tlm?  JLG 11.4.14
 		for (int i = 0; i < TELEMETRY_STATUS_ORB_ID_NUM; i++) {
 			orb_check(telemetry_subs[i], &updated);
 
@@ -1329,7 +1330,7 @@ int commander_thread_main(int argc, char *argv[])
 					mavlink_log_critical(mavlink_fd, "LANDED MODE");
 
 				} else {
-					mavlink_log_critical(mavlink_fd, "IN AIR MODE");
+					mavlink_log_critical(mavlink_fd, "IN AIR MODE");  //  this is an unreachable path
 				}
 			}
 		}
@@ -2400,7 +2401,7 @@ void answer_command(struct vehicle_command_s &cmd, enum VEHICLE_CMD_RESULT resul
 		break;
 
 	case VEHICLE_CMD_RESULT_UNSUPPORTED:
-		mavlink_log_critical(mavlink_fd, "command unsupported: %u", cmd.command);
+		mavlink_log_critical(mavlink_fd, "command not supported: %u", cmd.command);
 		tune_negative(true);
 		break;
 

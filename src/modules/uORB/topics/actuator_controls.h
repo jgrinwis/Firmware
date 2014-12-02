@@ -65,6 +65,15 @@ struct actuator_controls_s {
 	float	control[NUM_ACTUATOR_CONTROLS];
 };
 
+
+struct cubewano_controls_s
+{
+	int16_t 	ingnition;		//  engine on/off
+	uint16_t	rpm;			//  engine rpm
+	uint16_t	rpm_percentage; //  engine rpm %
+	uint16_t    fuel_type;		//  fuel type (heavy, gas, other)
+};
+
 /**
  * @}
  */
@@ -74,5 +83,8 @@ ORB_DECLARE(actuator_controls_0);
 ORB_DECLARE(actuator_controls_1);
 ORB_DECLARE(actuator_controls_2);
 ORB_DECLARE(actuator_controls_3);
+
+//  cubewano
+ORB_DECLARE(cubewano_cmd);
 
 #endif

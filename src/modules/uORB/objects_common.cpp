@@ -182,6 +182,8 @@ ORB_DEFINE(actuator_controls_0, struct actuator_controls_s);
 ORB_DEFINE(actuator_controls_1, struct actuator_controls_s);
 ORB_DEFINE(actuator_controls_2, struct actuator_controls_s);
 ORB_DEFINE(actuator_controls_3, struct actuator_controls_s);
+//  cubewano controls
+ORB_DEFINE(cubewano_cmd, struct cubewano_controls_s);
 
 #include "topics/actuator_armed.h"
 ORB_DEFINE(actuator_armed, struct actuator_armed_s);

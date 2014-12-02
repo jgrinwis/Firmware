@@ -127,6 +127,11 @@ private:
 	void handle_message_hil_sensor(mavlink_message_t *msg);
 	void handle_message_hil_gps(mavlink_message_t *msg);
 	void handle_message_hil_state_quaternion(mavlink_message_t *msg);
+	void handle_message_cubewano_off(mavlink_message_t *msg);
+	void handle_message_cubewano_on(mavlink_message_t *msg);
+	void handle_message_cubewano_rpm(mavlink_message_t *msg);
+	void handle_message_cubewano_rpm_per(mavlink_message_t *msg);
+	void handle_message_cubewano_fuel_type(mavlink_message_t *msg);
 
 	void *receive_thread(void *arg);
 
@@ -158,6 +163,12 @@ private:
 	orb_advert_t _telemetry_status_pub;
 	orb_advert_t _rc_pub;
 	orb_advert_t _manual_pub;
+	orb_advert_t _cubewano_on_pub;
+	orb_advert_t _cubewano_off_pub;
+	orb_advert_t _cubewano_rpm_pub;
+	orb_advert_t _cubewano_rpm_per_pub;
+	orb_advert_t _cubewano_fuel_type_pub;
+
 	int _control_mode_sub;
 	int _hil_frames;
 	uint64_t _old_timestamp;

@@ -78,13 +78,16 @@
 
 __BEGIN_DECLS
 
-#include "mavlink_bridge_header.h"
+#include <v1.0/cubewano/mavlink.h>  //  Grab Cubewano specific messages from here
+#include "mavlink_bridge_header.h"  //  <- This is the portal through which mavlink/common/common.h is included
 #include "mavlink_receiver.h"
 #include "mavlink_main.h"
 
 __END_DECLS
 
 static const float mg2ms2 = CONSTANTS_ONE_G / 1000.0f;
+
+static int mavlink_fd = 0;
 
 MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_mavlink(parent),
@@ -135,6 +138,8 @@ MavlinkReceiver::~MavlinkReceiver()
 void
 MavlinkReceiver::handle_message(mavlink_message_t *msg)
 {
+//	mavlink_log_critical(mavlink_fd, "Message rcvd with ID:  %i", msg->msgid);
+
 	switch (msg->msgid) {
 	case MAVLINK_MSG_ID_COMMAND_LONG:
 		handle_message_command_long(msg);
@@ -186,6 +191,10 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 
 	case MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL:
 		MavlinkFTP::get_server()->handle_message(_mavlink, msg);
+		break;
+
+	case MAVLINK_MSG_ID_CUBEWANO_OFF:
+		handle_message_cubewano_off(msg);
 		break;
 
 	default:
@@ -1318,6 +1327,60 @@ MavlinkReceiver::handle_message_hil_state_quaternion(mavlink_message_t *msg)
 }
 
 
+//
+//  -----  handle_message_cubewano_off  -----
+//
+//
+//  process the cubewano engine shutoff command here...
+//
+void MavlinkReceiver::handle_message_cubewano_off(mavlink_message_t *msg)
+{
+	//  somewhat silly check as the on/off commands are separate, but verify off state was commanded...
+	if (mavlink_msg_cubewano_off_get_off(msg) > 0)
+	{
+
+	}
+}
+
+
+//
+//  -----  handle_message_cubewano_on  -----
+//
+//
+//  process the cubewano engine startup command here...
+//
+void MavlinkReceiver::handle_message_cubewano_on(mavlink_message_t *msg)
+{
+	mavlink_cubewano_on_t cmd_cubewano_mavlink;
+	mavlink_msg_cubewano_on_decode(msg, &cmd_cubewano_mavlink);
+
+	struct cubewano_controls_s cubewano_cmd;
+	memset(&cubewano_cmd, 0, sizeof(cubewano_cmd));
+
+	cubewano_cmd.ingnition = cmd_cubewano_mavlink.on;
+
+	if (_cubewano_on_pub < 0) {
+		_cubewano_on_pub = orb_advertise(ORB_ID(cubewano_cmd), &cubewano_cmd);  //  advertise also publishes
+
+	} else {
+		orb_publish(ORB_ID(cubewano_cmd), _cmd_pub, &cubewano_cmd);
+	}
+
+}
+
+
+//
+//  -----  handle_message_cubewano_rpm  -----
+//
+//
+//  process the cubewano engine rpm command here...
+//
+void MavlinkReceiver::handle_message_cubewano_rpm(mavlink_message_t *msg)
+{
+
+}
+
+
 /**
  * Receive data from UART.
  */
@@ -1325,6 +1388,8 @@ void *
 MavlinkReceiver::receive_thread(void *arg)
 {
 	int uart_fd = _mavlink->get_uart_fd();
+
+	mavlink_fd = open("/dev/mavlink", 0);
 
 	const int timeout = 500;
 	uint8_t buf[32];

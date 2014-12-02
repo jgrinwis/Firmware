@@ -68,12 +68,14 @@ UavcanNode::UavcanNode(uavcan::ICanDriver &can_driver, uavcan::ISystemClock &sys
 	CDev("uavcan", UAVCAN_DEVICE_PATH),
 	_node(can_driver, system_clock),
 	_node_mutex(),
-	_esc_controller(_node)
+	_esc_controller(_node),
+	_cubewano_controller(_node)
 {
 	_control_topics[0] = ORB_ID(actuator_controls_0);
 	_control_topics[1] = ORB_ID(actuator_controls_1);
 	_control_topics[2] = ORB_ID(actuator_controls_2);
 	_control_topics[3] = ORB_ID(actuator_controls_3);
+	_cubewano_topic	   = ORB_ID(cubewano_cmd);
 
 	const int res = pthread_mutex_init(&_node_mutex, nullptr);
 	if (res < 0) {
@@ -311,7 +313,7 @@ int UavcanNode::run()
 
 	while (!_task_should_exit) {
 		// update actuator controls subscriptions if needed
-		if (_groups_subscribed != _groups_required) {
+		if ((_groups_subscribed != _groups_required) || (_cubewano_subs == 0)) {
 			subscribe();
 			_groups_subscribed = _groups_required;
 		}
@@ -320,6 +322,7 @@ int UavcanNode::run()
 		(void)pthread_mutex_unlock(&_node_mutex);
 
 		const int poll_ret = ::poll(_poll_fds, _poll_fds_num, PollTimeoutMs);
+		const int cubewano_poll_ret = ::poll(&_cubewano_poll_fds, 1, PollTimeoutMs);
 
 		(void)pthread_mutex_lock(&_node_mutex);
 
@@ -343,6 +346,7 @@ int UavcanNode::run()
 				}
 			}
 
+			//  ESC stuff (unused)
 			// can we mix?
 			if (controls_updated && (_mixers != nullptr)) {
 
@@ -382,7 +386,26 @@ int UavcanNode::run()
 				// Output to the bus
 				_esc_controller.update_outputs(outputs.output, outputs.noutputs);
 			}
+
 		}
+
+		if (cubewano_poll_ret < 0)
+		{
+			log("poll error %d", errno);
+			continue;
+		}
+		else
+		{
+
+		}
+
+		//  check for mavlink cubewano messages...
+		//  Cubewano control
+
+		//_cubewano_controller.update_outputs()
+
+
+
 
 		// Check arming state
 		bool updated = false;
@@ -458,6 +481,12 @@ UavcanNode::subscribe()
 			_poll_fds_num++;
 		}
 	}
+
+	//  now subscribe to cubewano
+	_cubewano_subs = orb_subscribe(_cubewano_topic);
+	_cubewano_poll_fds.fd = _cubewano_subs;
+	_cubewano_poll_fds.events = POLLIN;
+
 }
 
 int

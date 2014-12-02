@@ -43,6 +43,7 @@
 #include <uORB/topics/actuator_armed.h>
 
 #include "actuators/esc.hpp"
+#include "actuators/cubewano.hpp"
 #include "sensors/sensor_bridge.hpp"
 
 /**
@@ -110,6 +111,7 @@ private:
 	pthread_mutex_t		_node_mutex;
 
 	UavcanEscController	_esc_controller;
+	UavcanCubewanoController _cubewano_controller;
 
 	List<IUavcanSensorBridge*> _sensor_bridges;		///< List of active sensor bridges
 
@@ -118,8 +120,12 @@ private:
 	uint32_t		_groups_required = 0;
 	uint32_t		_groups_subscribed = 0;
 	int			_control_subs[NUM_ACTUATOR_CONTROL_GROUPS_UAVCAN] = {};
+	int			_cubewano_subs = 0;
 	actuator_controls_s 	_controls[NUM_ACTUATOR_CONTROL_GROUPS_UAVCAN] = {};
+	cubewano_controls_s     _cubewano_control;
 	orb_id_t		_control_topics[NUM_ACTUATOR_CONTROL_GROUPS_UAVCAN] = {};
+	orb_id_t		_cubewano_topic;
 	pollfd			_poll_fds[NUM_ACTUATOR_CONTROL_GROUPS_UAVCAN + 1] = {};	///< +1 for /dev/uavcan/busevent
+	pollfd			_cubewano_poll_fds;  //  +1 for /dev/uavcan/busevent
 	unsigned		_poll_fds_num = 0;
 };
