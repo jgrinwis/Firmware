@@ -119,6 +119,11 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_telemetry_status_pub(-1),
 	_rc_pub(-1),
 	_manual_pub(-1),
+	_cubewano_on_pub(-1),
+	_cubewano_off_pub(-1),
+	_cubewano_rpm_pub(-1),
+	_cubewano_rpm_per_pub(-1),
+	_cubewano_fuel_type_pub(-1),
 	_control_mode_sub(orb_subscribe(ORB_ID(vehicle_control_mode))),
 	_hil_frames(0),
 	_old_timestamp(0),
@@ -149,8 +154,8 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 		handle_message_command_int(msg);
 		break;
 
-	case MAVLINK_MSG_ID_OPTICAL_FLOW:
-		handle_message_optical_flow(msg);
+	case MAVLINK_MSG_ID_OPTICAL_FLOW_RAD:
+		handle_message_optical_flow_rad(msg);
 		break;
 
 	case MAVLINK_MSG_ID_SET_MODE:
@@ -361,24 +366,27 @@ MavlinkReceiver::handle_message_command_int(mavlink_message_t *msg)
 }
 
 void
-MavlinkReceiver::handle_message_optical_flow(mavlink_message_t *msg)
+MavlinkReceiver::handle_message_optical_flow_rad(mavlink_message_t *msg)
 {
 	/* optical flow */
-	mavlink_optical_flow_t flow;
-	mavlink_msg_optical_flow_decode(msg, &flow);
+	mavlink_optical_flow_rad_t flow;
+	mavlink_msg_optical_flow_rad_decode(msg, &flow);
 
 	struct optical_flow_s f;
 	memset(&f, 0, sizeof(f));
 
-	f.timestamp = hrt_absolute_time();
-	f.flow_timestamp = flow.time_usec;
-	f.flow_raw_x = flow.flow_x;
-	f.flow_raw_y = flow.flow_y;
-	f.flow_comp_x_m = flow.flow_comp_m_x;
-	f.flow_comp_y_m = flow.flow_comp_m_y;
-	f.ground_distance_m = flow.ground_distance;
+	f.timestamp = flow.time_usec;
+	f.integration_timespan = flow.integration_time_us;
+	f.pixel_flow_x_integral = flow.integrated_x;
+	f.pixel_flow_y_integral = flow.integrated_y;
+	f.gyro_x_rate_integral = flow.integrated_xgyro;
+	f.gyro_y_rate_integral = flow.integrated_ygyro;
+	f.gyro_z_rate_integral = flow.integrated_zgyro;
+	f.time_since_last_sonar_update = flow.time_delta_distance_us;
+	f.ground_distance_m = flow.distance;
 	f.quality = flow.quality;
 	f.sensor_id = flow.sensor_id;
+	f.gyro_temperature = flow.temperature;
 
 	if (_flow_pub < 0) {
 		_flow_pub = orb_advertise(ORB_ID(optical_flow), &f);
@@ -398,15 +406,18 @@ MavlinkReceiver::handle_message_hil_optical_flow(mavlink_message_t *msg)
 	struct optical_flow_s f;
 	memset(&f, 0, sizeof(f));
 
-	f.timestamp = hrt_absolute_time();
-	f.flow_timestamp = flow.time_usec;
-	f.flow_raw_x = flow.flow_x;
-	f.flow_raw_y = flow.flow_y;
-	f.flow_comp_x_m = flow.flow_comp_m_x;
-	f.flow_comp_y_m = flow.flow_comp_m_y;
-	f.ground_distance_m = flow.ground_distance;
+	f.timestamp = hrt_absolute_time(); // XXX we rely on the system time for now and not flow.time_usec;
+	f.integration_timespan = flow.integration_time_us;
+	f.pixel_flow_x_integral = flow.integrated_x;
+	f.pixel_flow_y_integral = flow.integrated_y;
+	f.gyro_x_rate_integral = flow.integrated_xgyro;
+	f.gyro_y_rate_integral = flow.integrated_ygyro;
+	f.gyro_z_rate_integral = flow.integrated_zgyro;
+	f.time_since_last_sonar_update = flow.time_delta_distance_us;
+	f.ground_distance_m = flow.distance;
 	f.quality = flow.quality;
 	f.sensor_id = flow.sensor_id;
+	f.gyro_temperature = flow.temperature;
 
 	if (_flow_pub < 0) {
 		_flow_pub = orb_advertise(ORB_ID(optical_flow), &f);
@@ -422,7 +433,7 @@ MavlinkReceiver::handle_message_hil_optical_flow(mavlink_message_t *msg)
 	r.timestamp = hrt_absolute_time();
 	r.error_count = 0;
 	r.type = RANGE_FINDER_TYPE_LASER;
-	r.distance = flow.ground_distance;
+	r.distance = flow.distance;
 	r.minimum_distance = 0.0f;
 	r.maximum_distance = 40.0f; // this is set to match the typical range of real sensors, could be made configurable
 	r.valid = (r.distance > r.minimum_distance) && (r.distance < r.maximum_distance);
@@ -549,12 +560,16 @@ MavlinkReceiver::handle_message_set_position_target_local_ned(mavlink_message_t 
 			offboard_control_sp.ignore &=  ~(1 << i);
 			offboard_control_sp.ignore |=  (set_position_target_local_ned.type_mask & (1 << i));
 		}
+
 		offboard_control_sp.ignore &=  ~(1 << OFB_IGN_BIT_YAW);
-			offboard_control_sp.ignore |=  (set_position_target_local_ned.type_mask & (1 << 10)) <<
-					OFB_IGN_BIT_YAW;
+		if (set_position_target_local_ned.type_mask & (1 << 10)) {
+			offboard_control_sp.ignore |=  (1 << OFB_IGN_BIT_YAW);
+		}
+
 		offboard_control_sp.ignore &=  ~(1 << OFB_IGN_BIT_YAWRATE);
-			offboard_control_sp.ignore |=  (set_position_target_local_ned.type_mask & (1 << 11)) <<
-					OFB_IGN_BIT_YAWRATE;
+		if (set_position_target_local_ned.type_mask & (1 << 11)) {
+			offboard_control_sp.ignore |=  (1 << OFB_IGN_BIT_YAWRATE);
+		}
 
 		offboard_control_sp.timestamp = hrt_absolute_time();
 
@@ -1351,19 +1366,16 @@ void MavlinkReceiver::handle_message_cubewano_off(mavlink_message_t *msg)
 //
 void MavlinkReceiver::handle_message_cubewano_on(mavlink_message_t *msg)
 {
-	mavlink_cubewano_on_t cmd_cubewano_mavlink;
-	mavlink_msg_cubewano_on_decode(msg, &cmd_cubewano_mavlink);
+	mavlink_cubewano_on_t cmd_cubewano_on_mavlink;
+	mavlink_msg_cubewano_on_decode(msg, &cmd_cubewano_on_mavlink);
 
-	struct cubewano_controls_s cubewano_cmd;
-	memset(&cubewano_cmd, 0, sizeof(cubewano_cmd));
-
-	cubewano_cmd.ingnition = cmd_cubewano_mavlink.on;
+	_cubewano_cmds.ingnition = cmd_cubewano_on_mavlink.on;
 
 	if (_cubewano_on_pub < 0) {
-		_cubewano_on_pub = orb_advertise(ORB_ID(cubewano_cmd), &cubewano_cmd);  //  advertise also publishes
+		_cubewano_on_pub = orb_advertise(ORB_ID(cubewano_cmd), &_cubewano_cmds);  //  advertise also publishes
 
 	} else {
-		orb_publish(ORB_ID(cubewano_cmd), _cmd_pub, &cubewano_cmd);
+		orb_publish(ORB_ID(cubewano_cmd), _cmd_pub, &_cubewano_cmds);
 	}
 
 }
@@ -1377,6 +1389,17 @@ void MavlinkReceiver::handle_message_cubewano_on(mavlink_message_t *msg)
 //
 void MavlinkReceiver::handle_message_cubewano_rpm(mavlink_message_t *msg)
 {
+	mavlink_cubewano_rpm_t cmd_cubewano_rpm_mavlink;
+	mavlink_msg_cubewano_rpm_decode(msg, &cmd_cubewano_rpm_mavlink);
+
+	_cubewano_cmds.rpm = cmd_cubewano_rpm_mavlink.rpm;
+
+	if (_cubewano_on_pub < 0) {
+		_cubewano_on_pub = orb_advertise(ORB_ID(cubewano_cmd), &_cubewano_cmds);  //  advertise also publishes
+
+	} else {
+		orb_publish(ORB_ID(cubewano_cmd), _cmd_pub, &_cubewano_cmds);
+	}
 
 }
 
@@ -1463,7 +1486,7 @@ MavlinkReceiver::receive_start(Mavlink *parent)
 
 	struct sched_param param;
 	(void)pthread_attr_getschedparam(&receiveloop_attr, &param);
-	param.sched_priority = SCHED_PRIORITY_MAX - 40;
+	param.sched_priority = SCHED_PRIORITY_MAX - 80;
 	(void)pthread_attr_setschedparam(&receiveloop_attr, &param);
 
 	pthread_attr_setstacksize(&receiveloop_attr, 2900);

@@ -64,7 +64,7 @@
 #include <uORB/topics/optical_flow.h>
 #include <uORB/topics/actuator_outputs.h>
 #include <uORB/topics/actuator_controls_effective.h>
-#include <uORB/topics/actuator_controls.h>
+#include <uORB/topics/actuator_controls.h>  //  Has cubewano defs
 #include <uORB/topics/actuator_armed.h>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/telemetry_status.h>
@@ -112,7 +112,7 @@ private:
 	void handle_message(mavlink_message_t *msg);
 	void handle_message_command_long(mavlink_message_t *msg);
 	void handle_message_command_int(mavlink_message_t *msg);
-	void handle_message_optical_flow(mavlink_message_t *msg);
+	void handle_message_optical_flow_rad(mavlink_message_t *msg);
 	void handle_message_hil_optical_flow(mavlink_message_t *msg);
 	void handle_message_set_mode(mavlink_message_t *msg);
 	void handle_message_vicon_position_estimate(mavlink_message_t *msg);
@@ -169,12 +169,17 @@ private:
 	orb_advert_t _cubewano_rpm_per_pub;
 	orb_advert_t _cubewano_fuel_type_pub;
 
+
+	/*struct*/ cubewano_controls_s _cubewano_cmds = {};
+
 	int _control_mode_sub;
 	int _hil_frames;
 	uint64_t _old_timestamp;
 	bool _hil_local_proj_inited;
 	float _hil_local_alt0;
 	struct map_projection_reference_s _hil_local_proj_ref;
+
+
 
 	/* do not allow copying this class */
 	MavlinkReceiver(const MavlinkReceiver&);

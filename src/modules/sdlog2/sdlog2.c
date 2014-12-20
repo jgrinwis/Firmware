@@ -90,6 +90,7 @@
 #include <uORB/topics/system_power.h>
 #include <uORB/topics/servorail_status.h>
 #include <uORB/topics/wind_estimate.h>
+#include <uORB/topics/encoders.h>
 
 #include <systemlib/systemlib.h>
 #include <systemlib/param/param.h>
@@ -495,6 +496,8 @@ static void *logwriter_thread(void *arg)
 	/* set name */
 	prctl(PR_SET_NAME, "sdlog2_writer", 0);
 
+	perf_counter_t perf_write = perf_alloc(PC_ELAPSED, "sd write");
+
 	int log_fd = open_log_file();
 
 	if (log_fd < 0) {
@@ -552,7 +555,9 @@ static void *logwriter_thread(void *arg)
 				n = available;
 			}
 
+			perf_begin(perf_write);
 			n = write(log_fd, read_ptr, n);
+			perf_end(perf_write);
 
 			should_wait = (n == available) && !is_part;
 
@@ -584,6 +589,9 @@ static void *logwriter_thread(void *arg)
 
 	fsync(log_fd);
 	close(log_fd);
+
+	/* free performance counter */
+	perf_free(perf_write);
 
 	return NULL;
 }
@@ -933,6 +941,7 @@ int sdlog2_thread_main(int argc, char *argv[])
 		struct vehicle_rates_setpoint_s rates_sp;
 		struct actuator_outputs_s act_outputs;
 		struct actuator_controls_s act_controls;
+		struct actuator_controls_s act_controls1;
 		struct vehicle_local_position_s local_pos;
 		struct vehicle_local_position_setpoint_s local_pos_sp;
 		struct vehicle_global_position_s global_pos;
@@ -954,6 +963,7 @@ int sdlog2_thread_main(int argc, char *argv[])
 		struct servorail_status_s servorail_status;
 		struct satellite_info_s sat_info;
 		struct wind_estimate_s wind_estimate;
+		struct encoders_s encoders;
 	} buf;
 
 	memset(&buf, 0, sizeof(buf));
@@ -996,6 +1006,7 @@ int sdlog2_thread_main(int argc, char *argv[])
 			struct log_GS1B_s log_GS1B;
 			struct log_TECS_s log_TECS;
 			struct log_WIND_s log_WIND;
+			struct log_ENCD_s log_ENCD;
 		} body;
 	} log_msg = {
 		LOG_PACKET_HEADER_INIT(0)
@@ -1012,6 +1023,7 @@ int sdlog2_thread_main(int argc, char *argv[])
 		int rates_sp_sub;
 		int act_outputs_sub;
 		int act_controls_sub;
+		int act_controls_1_sub;
 		int local_pos_sub;
 		int local_pos_sp_sub;
 		int global_pos_sub;
@@ -1033,6 +1045,7 @@ int sdlog2_thread_main(int argc, char *argv[])
 		int system_power_sub;
 		int servorail_status_sub;
 		int wind_sub;
+		int encoders_sub;
 	} subs;
 
 	subs.cmd_sub = orb_subscribe(ORB_ID(vehicle_command));
@@ -1044,6 +1057,7 @@ int sdlog2_thread_main(int argc, char *argv[])
 	subs.rates_sp_sub = orb_subscribe(ORB_ID(vehicle_rates_setpoint));
 	subs.act_outputs_sub = orb_subscribe(ORB_ID_VEHICLE_CONTROLS);
 	subs.act_controls_sub = orb_subscribe(ORB_ID_VEHICLE_ATTITUDE_CONTROLS);
+	subs.act_controls_1_sub = orb_subscribe(ORB_ID(actuator_controls_1));
 	subs.local_pos_sub = orb_subscribe(ORB_ID(vehicle_local_position));
 	subs.local_pos_sp_sub = orb_subscribe(ORB_ID(vehicle_local_position_setpoint));
 	subs.global_pos_sub = orb_subscribe(ORB_ID(vehicle_global_position));
@@ -1064,7 +1078,7 @@ int sdlog2_thread_main(int argc, char *argv[])
 	subs.wind_sub = orb_subscribe(ORB_ID(wind_estimate));
 	/* we need to rate-limit wind, as we do not need the full update rate */
 	orb_set_interval(subs.wind_sub, 90);
-
+	subs.encoders_sub = orb_subscribe(ORB_ID(encoders));
 
 	/* add new topics HERE */
 
@@ -1364,6 +1378,18 @@ int sdlog2_thread_main(int argc, char *argv[])
 			log_msg.body.log_ATT.gy = buf.att.g_comp[1];
 			log_msg.body.log_ATT.gz = buf.att.g_comp[2];
 			LOGBUFFER_WRITE_AND_COUNT(ATT);
+			// secondary attitude
+			log_msg.msg_type = LOG_ATT2_MSG;
+			log_msg.body.log_ATT.roll = buf.att.roll_sec;
+			log_msg.body.log_ATT.pitch = buf.att.pitch_sec;
+			log_msg.body.log_ATT.yaw = buf.att.yaw_sec;
+			log_msg.body.log_ATT.roll_rate = buf.att.rollspeed_sec;
+			log_msg.body.log_ATT.pitch_rate = buf.att.pitchspeed_sec;
+			log_msg.body.log_ATT.yaw_rate = buf.att.yawspeed_sec;
+			log_msg.body.log_ATT.gx = buf.att.g_comp_sec[0];
+			log_msg.body.log_ATT.gy = buf.att.g_comp_sec[1];
+			log_msg.body.log_ATT.gz = buf.att.g_comp_sec[2];
+			LOGBUFFER_WRITE_AND_COUNT(ATT);
 		}
 
 		/* --- ATTITUDE SETPOINT --- */
@@ -1395,6 +1421,16 @@ int sdlog2_thread_main(int argc, char *argv[])
 		/* --- ACTUATOR CONTROL --- */
 		if (copy_if_updated(ORB_ID_VEHICLE_ATTITUDE_CONTROLS, subs.act_controls_sub, &buf.act_controls)) {
 			log_msg.msg_type = LOG_ATTC_MSG;
+			log_msg.body.log_ATTC.roll = buf.act_controls.control[0];
+			log_msg.body.log_ATTC.pitch = buf.act_controls.control[1];
+			log_msg.body.log_ATTC.yaw = buf.act_controls.control[2];
+			log_msg.body.log_ATTC.thrust = buf.act_controls.control[3];
+			LOGBUFFER_WRITE_AND_COUNT(ATTC);
+		}
+
+		/* --- ACTUATOR CONTROL FW VTOL --- */
+		if(copy_if_updated(ORB_ID(actuator_controls_1),subs.act_controls_1_sub,&buf.act_controls)) {
+			log_msg.msg_type = LOG_ATC1_MSG;
 			log_msg.body.log_ATTC.roll = buf.act_controls.control[0];
 			log_msg.body.log_ATTC.pitch = buf.act_controls.control[1];
 			log_msg.body.log_ATTC.yaw = buf.act_controls.control[2];
@@ -1507,11 +1543,14 @@ int sdlog2_thread_main(int argc, char *argv[])
 		/* --- FLOW --- */
 		if (copy_if_updated(ORB_ID(optical_flow), subs.flow_sub, &buf.flow)) {
 			log_msg.msg_type = LOG_FLOW_MSG;
-			log_msg.body.log_FLOW.flow_raw_x = buf.flow.flow_raw_x;
-			log_msg.body.log_FLOW.flow_raw_y = buf.flow.flow_raw_y;
-			log_msg.body.log_FLOW.flow_comp_x = buf.flow.flow_comp_x_m;
-			log_msg.body.log_FLOW.flow_comp_y = buf.flow.flow_comp_y_m;
-			log_msg.body.log_FLOW.distance = buf.flow.ground_distance_m;
+			log_msg.body.log_FLOW.ground_distance_m = buf.flow.ground_distance_m;
+			log_msg.body.log_FLOW.gyro_temperature = buf.flow.gyro_temperature;
+			log_msg.body.log_FLOW.gyro_x_rate_integral = buf.flow.gyro_x_rate_integral;
+			log_msg.body.log_FLOW.gyro_y_rate_integral = buf.flow.gyro_y_rate_integral;
+			log_msg.body.log_FLOW.gyro_z_rate_integral = buf.flow.gyro_z_rate_integral;
+			log_msg.body.log_FLOW.integration_timespan = buf.flow.integration_timespan;
+			log_msg.body.log_FLOW.pixel_flow_x_integral = buf.flow.pixel_flow_x_integral;
+			log_msg.body.log_FLOW.pixel_flow_y_integral = buf.flow.pixel_flow_y_integral;
 			log_msg.body.log_FLOW.quality = buf.flow.quality;
 			log_msg.body.log_FLOW.sensor_id = buf.flow.sensor_id;
 			LOGBUFFER_WRITE_AND_COUNT(FLOW);
@@ -1665,6 +1704,16 @@ int sdlog2_thread_main(int argc, char *argv[])
 			log_msg.body.log_WIND.cov_x = buf.wind_estimate.covariance_north;
 			log_msg.body.log_WIND.cov_y = buf.wind_estimate.covariance_east;
 			LOGBUFFER_WRITE_AND_COUNT(WIND);
+		}
+
+		/* --- ENCODERS --- */
+		if (copy_if_updated(ORB_ID(encoders), subs.encoders_sub, &buf.encoders)) {
+			log_msg.msg_type = LOG_ENCD_MSG;
+			log_msg.body.log_ENCD.cnt0 = buf.encoders.counts[0];
+			log_msg.body.log_ENCD.vel0 = buf.encoders.velocity[0];
+			log_msg.body.log_ENCD.cnt1 = buf.encoders.counts[1];
+			log_msg.body.log_ENCD.vel1 = buf.encoders.velocity[1];
+			LOGBUFFER_WRITE_AND_COUNT(ENCD);
 		}
 
 		/* signal the other thread new data, but not yet unlock */
